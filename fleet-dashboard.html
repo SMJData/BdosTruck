@@ -29,7 +29,7 @@ body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.45;
 }
-button, input { font: inherit; }
+button { font: inherit; }
 .topbar {
   background: var(--navy);
   color: #fff;
@@ -56,7 +56,7 @@ button, input { font: inherit; }
 .brand-logo svg { width: 100%; height: auto; display: block; }
 h1 {
   margin: 0;
-  font-size: clamp(28px, 4vw, 48px);
+  font-size: 44px;
   line-height: 1.05;
   font-weight: 760;
   letter-spacing: 0;
@@ -80,7 +80,7 @@ h1 {
   color: var(--muted);
   font-size: 13px;
 }
-.btn, .file-btn {
+.btn {
   appearance: none;
   border: 1px solid var(--line);
   background: var(--panel);
@@ -94,18 +94,6 @@ h1 {
   background: var(--navy);
   border-color: var(--navy);
   color: #fff;
-}
-.file-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.file-btn input {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px;
-  pointer-events: none;
 }
 .summary-grid {
   display: grid;
@@ -130,7 +118,7 @@ h1 {
 }
 .metric-value {
   margin-top: 8px;
-  font-size: clamp(24px, 3.5vw, 36px);
+  font-size: 34px;
   line-height: 1;
   font-weight: 760;
   letter-spacing: 0;
@@ -182,7 +170,7 @@ h1 {
 }
 #fleetMap {
   width: 100%;
-  height: 640px;
+  height: clamp(420px, 56vh, 640px);
   display: block;
   background: linear-gradient(180deg, #f8fbfe 0%, #edf5fa 100%);
   touch-action: none;
@@ -360,7 +348,10 @@ h1 {
   color: var(--muted);
   font-size: 13px;
 }
-.table-wrap { overflow-x: auto; }
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -426,10 +417,28 @@ td.num, th.num {
   .side-panel, .map-card { min-height: auto; }
 }
 @media (max-width: 760px) {
+  .topbar { padding: 18px 16px; }
   .topbar-inner { grid-template-columns: 1fr; }
   .brand-logo { max-width: 240px; }
-  .summary-grid, .dashboard-grid, .risk-grid { grid-template-columns: 1fr; }
-  #fleetMap { height: 300px; }
+  h1 { font-size: 34px; }
+  .headline p { font-size: 14px; }
+  .wrap { padding: 16px 14px 32px; }
+  .source-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .status { width: 100%; }
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .metric {
+    min-height: 106px;
+    padding: 14px;
+  }
+  .metric-value { font-size: 28px; }
+  .dashboard-grid, .risk-grid { grid-template-columns: 1fr; }
+  #fleetMap { height: min(72vh, 430px); }
   .map-legend {
     position: static;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -449,7 +458,78 @@ td.num, th.num {
   }
   .toolbar, .source-row { align-items: stretch; }
   .control-group, .segmented { width: 100%; }
-  .chip, .btn, .file-btn { flex: 1 1 auto; justify-content: center; }
+  .chip, .btn { flex: 1 1 auto; justify-content: center; }
+}
+@media (max-width: 560px) {
+  .brand-logo { max-width: 210px; }
+  h1 { font-size: 30px; }
+  .summary-grid { grid-template-columns: 1fr; }
+  .control-group, .segmented {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .source-row .control-group { grid-template-columns: 1fr; }
+  .chip, .btn {
+    width: 100%;
+    min-width: 0;
+  }
+  .map-layout { gap: 12px; }
+  #fleetMap { height: 340px; }
+  .side-panel, .panel, .risk { padding: 14px; }
+  .detail-row {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .bar-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .bar-value { text-align: left; }
+  .table-head {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 14px;
+  }
+  .table-wrap { overflow-x: visible; }
+  table, thead, tbody, tr, td {
+    display: block;
+    width: 100%;
+  }
+  thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  tbody {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+  tr {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  td {
+    display: grid;
+    grid-template-columns: minmax(92px, 36%) 1fr;
+    gap: 10px;
+    align-items: start;
+    padding: 9px 10px;
+  }
+  td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 750;
+  }
+  td.num {
+    text-align: left;
+    white-space: normal;
+  }
 }
 </style>
 </head>
@@ -564,10 +644,6 @@ td.num, th.num {
   <main class="wrap">
     <section class="source-row" aria-label="Data source controls">
       <div class="status" id="sourceStatus" aria-live="polite">Loading ServiceTruckCSV.csv...</div>
-      <div class="control-group">
-        <button class="btn primary" type="button" id="refreshCsv">Refresh ServiceTruckCSV.csv</button>
-        <label class="file-btn">Choose CSV<input type="file" id="csvFile" accept=".csv,text/csv"></label>
-      </div>
     </section>
 
     <section class="summary-grid" aria-label="Executive summary">
@@ -862,13 +938,13 @@ function loadCsv(csvText, sourceName) {
   renderAll();
   setStatus(`Loaded ${sourceName}: ${DATA.rows.length} trips, ${DATA.summary.locationCount} locations.`);
 }
-async function refreshCsv() {
+async function loadPublishedCsv() {
   try {
     const response = await fetch(`ServiceTruckCSV.csv?refresh=${Date.now()}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     loadCsv(await response.text(), "ServiceTruckCSV.csv");
   } catch (error) {
-    setStatus(`Could not load ServiceTruckCSV.csv (${error.message}). Keep it beside the HTML or use Choose CSV.`, true);
+    setStatus(`Could not load ServiceTruckCSV.csv (${error.message}). Keep it beside the HTML and redeploy the site.`, true);
   }
 }
 function filteredRows() { return state.day === "all" ? DATA.rows : DATA.rows.filter(row => row.date === state.day); }
@@ -1110,10 +1186,10 @@ function renderTable() {
   byId("tableSubhead").textContent = `${rows.length} records shown from ${DATA.sourceName}`;
   byId("tripRows").innerHTML = rows.map(row => `
     <tr class="${row.nearZero ? "zero" : ""}">
-      <td>${esc(row.start)}</td><td>${esc(row.origin)}</td><td>${esc(row.destination)}</td>
-      <td class="num">${fmt(row.distance, 2)}</td><td class="num">${fmt(row.drivingHours, 2)}</td>
-      <td class="num">${fmt(row.idlingHours, 2)}</td><td class="num">${fmt(row.stopHours, 2)}</td>
-      <td class="num">${fmtCompact(row.maxSpeed)}</td><td>${esc(row.zoneTypes)}</td>
+      <td data-label="Start">${esc(row.start)}</td><td data-label="Origin">${esc(row.origin)}</td><td data-label="Destination">${esc(row.destination)}</td>
+      <td class="num" data-label="Km">${fmt(row.distance, 2)}</td><td class="num" data-label="Drive h">${fmt(row.drivingHours, 2)}</td>
+      <td class="num" data-label="Idle h">${fmt(row.idlingHours, 2)}</td><td class="num" data-label="Stop h">${fmt(row.stopHours, 2)}</td>
+      <td class="num" data-label="Max speed">${fmtCompact(row.maxSpeed)}</td><td data-label="Zones">${esc(row.zoneTypes)}</td>
     </tr>`).join("");
 }
 function renderAll() {
@@ -1131,13 +1207,6 @@ function zoom(factor) {
   const nw = w * factor, nh = h * factor;
   setViewBox([x + (w - nw) / 2, y + (h - nh) / 2, nw, nh]);
 }
-byId("refreshCsv").addEventListener("click", refreshCsv);
-byId("csvFile").addEventListener("change", async event => {
-  const file = event.target.files[0];
-  if (!file) return;
-  try { loadCsv(await file.text(), file.name); }
-  catch (error) { setStatus(error.message, true); }
-});
 byId("zoomIn").addEventListener("click", () => zoom(0.78));
 byId("zoomOut").addEventListener("click", () => zoom(1.22));
 byId("resetView").addEventListener("click", () => setViewBox([...state.baseViewBox]));
@@ -1158,7 +1227,7 @@ svg.addEventListener("pointermove", event => {
 svg.addEventListener("pointerup", () => state.isDragging = false);
 svg.addEventListener("pointercancel", () => state.isDragging = false);
 
-refreshCsv();
+loadPublishedCsv();
 </script>
 </body>
 </html>
