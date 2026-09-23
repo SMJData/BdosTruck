@@ -673,7 +673,7 @@ td.num, th.num {
           <div class="legend-row"><span class="legend-swatch road"></span><span>Roads</span></div>
           <div class="legend-row"><span class="legend-swatch"></span><span>Trip path</span></div>
           <div class="legend-row"><span class="legend-swatch zero"></span><span>Near-zero leg</span></div>
-          <div class="legend-row"><span class="legend-dot"></span><span>Plus Code stop</span></div>
+          <div class="legend-row"><span class="legend-dot"></span><span>Precise stop</span></div>
           <div class="legend-row"><span class="legend-dot locality"></span><span>Locality anchor</span></div>
           <div class="legend-row"><span class="legend-pin">S</span><span>First start</span></div>
           <div class="legend-row"><span class="legend-pin end">E</span><span>Final stop</span></div>
@@ -707,14 +707,14 @@ td.num, th.num {
             <tr>
               <th>Start</th><th>Origin</th><th>Destination</th>
               <th class="num">Km</th><th class="num">Drive h</th><th class="num">Idle h</th>
-              <th class="num">Stop h</th><th class="num">Max speed</th><th>Zones</th>
+              <th class="num">Day stop h</th><th class="num">Max speed</th><th>Zones</th>
             </tr>
           </thead>
           <tbody id="tripRows"></tbody>
         </table>
       </div>
     </section>
-    <p class="footer">Prepared from the active CSV. Boundary: SimpleMaps Barbados WGS84 GeoJSON, Creative Commons Attribution 4.0. Road context: Caribbean Marine Atlas road network. Locality-anchor coordinates should be validated before operational routing decisions.</p>
+    <p class="footer">Prepared from the active CSV. Day stop hours exclude gaps that continue into the next calendar day. Boundary: SimpleMaps Barbados WGS84 GeoJSON, Creative Commons Attribution 4.0. Road context: Caribbean Marine Atlas road network. Locality-anchor coordinates should be validated before operational routing decisions.</p>
   </main>
 </div>
 
@@ -798,26 +798,98 @@ function decodeOlc(code) {
   lon += OLC_PAIR_RESOLUTIONS[Math.floor(full.length / 2) - 1] / 2;
   return { lat: Number(lat.toFixed(6)), lon: Number(lon.toFixed(6)), fullCode };
 }
+const CSV_FIELDS = {
+  device: ["Device", "DeviceName"],
+  start: ["Start Date", "TripDetailStartDateTime"],
+  stop: ["Stop Date", "TripDetailStopDateTime"],
+  distance: ["Distance", "TripDetailDistance"],
+  driving: ["Driving Duration", "TripDetailDrivingDuraion", "TripDetailDrivingDuration"],
+  stopDuration: ["Stop Duration", "TripDetailStopDuration"],
+  origin: ["Origin", "TripDetailStartLocation"],
+  destination: ["Destination", "TripDetailLocation"],
+  zoneTypes: ["Stop Zone Types", "Location.ZoneZoneTypes"],
+  idling: ["Idling Duration", "TripDetailIdlingDuration"],
+  maxSpeed: ["Maximum Speed", "TripDetailMaximumSpeed"],
+  destinationLat: ["TripDetailLatitude"],
+  destinationLon: ["TripDetailLongitude"]
+};
+const REQUIRED_CSV_FIELDS = ["device", "start", "stop", "distance", "driving", "stopDuration", "origin", "destination", "idling", "maxSpeed"];
+
+function resolveCsvColumns(sample) {
+  const columns = {};
+  Object.entries(CSV_FIELDS).forEach(([key, aliases]) => {
+    columns[key] = aliases.find(alias => Object.prototype.hasOwnProperty.call(sample, alias)) || null;
+  });
+  const missing = REQUIRED_CSV_FIELDS.filter(key => !columns[key]).map(key => CSV_FIELDS[key].join(" / "));
+  if (missing.length) throw new Error(`CSV is missing required columns: ${missing.join(", ")}`);
+  return columns;
+}
+function csvValue(row, columns, key) {
+  return columns[key] ? row[columns[key]] : "";
+}
 function excelDate(value) {
   const ms = (Number(value) - 25569) * 86400 * 1000;
-  return new Date(ms);
+  const utc = new Date(ms);
+  return new Date(
+    utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate(),
+    utc.getUTCHours(), utc.getUTCMinutes(), utc.getUTCSeconds(), utc.getUTCMilliseconds()
+  );
+}
+function parseDateTime(value) {
+  const text = String(value ?? "").trim();
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) return excelDate(text);
+  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!match) throw new Error(`Unsupported date/time value: ${text || "blank"}`);
+  let [, day, month, year, hour, minute, second = "0", meridiem] = match;
+  let hourValue = Number(hour);
+  if (meridiem) {
+    hourValue %= 12;
+    if (meridiem.toUpperCase() === "PM") hourValue += 12;
+  }
+  const date = new Date(Number(year), Number(month) - 1, Number(day), hourValue, Number(minute), Number(second));
+  if (
+    date.getFullYear() !== Number(year) || date.getMonth() !== Number(month) - 1 ||
+    date.getDate() !== Number(day) || date.getHours() !== hourValue || date.getMinutes() !== Number(minute)
+  ) throw new Error(`Invalid date/time value: ${text}`);
+  return date;
 }
 function dateLabel(date) {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 function dateKey(date) {
-  return date.toISOString().slice(0, 10);
+  const pad = value => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 function dateTimeLabel(date) {
-  return `${dateKey(date)} ${date.toTimeString().slice(0, 5)}`;
+  return `${dateKey(date)} ${date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
 }
-function hours(value) {
-  return Number(value || 0) * 24;
+function durationHours(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  if (text.includes(":")) {
+    const parts = text.split(":").map(Number);
+    if (parts.some(part => !Number.isFinite(part)) || parts.length < 2 || parts.length > 3) {
+      throw new Error(`Unsupported duration value: ${text}`);
+    }
+    const [hoursValue, minutesValue, secondsValue = 0] = parts;
+    return hoursValue + minutesValue / 60 + secondsValue / 3600;
+  }
+  const number = Number(text);
+  if (!Number.isFinite(number)) throw new Error(`Unsupported duration value: ${text}`);
+  return number * 24;
 }
 function shortPlace(address) {
   let text = address || "";
-  if (text.includes(":")) text = text.split(":").slice(1).join(":");
-  text = text.replace(/^\d{5,6},\s*/, "").replace(PLUS_RE, "").replace(/,\s*Barbados/gi, "");
+  if (text.includes(":")) {
+    const colon = text.indexOf(":");
+    const namedPrefix = text.slice(0, colon).split(",")
+      .map(part => part.trim())
+      .filter(part => part && !/^\d+$/.test(part) && part.toLowerCase() !== "barbados" && !PLUS_RE.test(part))
+      .join(", ");
+    if (namedPrefix) return namedPrefix;
+    text = text.slice(colon + 1);
+  }
+  text = text.replace(/\b\d{5,6},\s*/g, "").replace(PLUS_RE, "").replace(/,\s*Barbados/gi, "").replace(/\s*,\s*,+/g, ", ");
   return text.replace(/\s+/g, " ").replace(/^[\s,-]+|[\s,-]+$/g, "") || address;
 }
 function coordinateFor(address) {
@@ -832,48 +904,95 @@ function coordinateFor(address) {
   }
   return { lat: BRIDGETOWN_REF[0], lon: BRIDGETOWN_REF[1], confidence: "locality", method: "Locality anchor: Barbados fallback" };
 }
-function validateRows(rawRows) {
-  const required = ["Device", "Start Date", "Stop Date", "Distance", "Driving Duration", "Stop Duration", "Origin", "Destination", "Idling Duration", "Maximum Speed"];
-  const missing = required.filter(col => !(col in (rawRows[0] || {})));
-  if (missing.length) throw new Error(`CSV is missing required columns: ${missing.join(", ")}`);
-}
 function buildDataset(csvText, sourceName) {
-  const rawRows = parseCSV(csvText).filter(row => row["Start Date"] && row.Origin && row.Destination);
-  validateRows(rawRows);
+  const parsedRows = parseCSV(csvText);
+  if (!parsedRows.length) throw new Error("CSV has no data rows");
+  const columns = resolveCsvColumns(parsedRows[0]);
+  const rawRows = parsedRows.map((row, index) => ({
+    sourceRow: index + 2,
+    device: csvValue(row, columns, "device"),
+    startValue: csvValue(row, columns, "start"),
+    stopValue: csvValue(row, columns, "stop"),
+    distanceValue: csvValue(row, columns, "distance"),
+    drivingValue: csvValue(row, columns, "driving"),
+    stopDurationValue: csvValue(row, columns, "stopDuration"),
+    origin: csvValue(row, columns, "origin"),
+    destination: csvValue(row, columns, "destination"),
+    zoneTypes: csvValue(row, columns, "zoneTypes"),
+    idlingValue: csvValue(row, columns, "idling"),
+    maxSpeedValue: csvValue(row, columns, "maxSpeed"),
+    destinationLatValue: csvValue(row, columns, "destinationLat"),
+    destinationLonValue: csvValue(row, columns, "destinationLon")
+  })).filter(row => row.startValue && row.stopValue && row.origin && row.destination);
+  if (!rawRows.length) throw new Error("CSV contains no complete trip rows");
   const addressSet = new Set();
-  rawRows.forEach(row => { addressSet.add(row.Origin); addressSet.add(row.Destination); });
+  const coordinateHints = {};
+  rawRows.forEach(row => {
+    addressSet.add(row.origin);
+    addressSet.add(row.destination);
+    const lat = Number(row.destinationLatValue), lon = Number(row.destinationLonValue);
+    if (Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+      coordinateHints[row.destination] = { lat, lon, confidence: "precise", method: "CSV destination coordinate" };
+    }
+  });
   const locations = {};
   [...addressSet].sort().forEach(address => {
-    locations[address] = { name: shortPlace(address), address, ...coordinateFor(address) };
+    locations[address] = { name: shortPlace(address), address, ...(coordinateHints[address] || coordinateFor(address)) };
   });
   const rows = rawRows.map((row, index) => {
-    const start = excelDate(row["Start Date"]);
-    const stop = excelDate(row["Stop Date"]);
-    const origin = locations[row.Origin];
-    const destination = locations[row.Destination];
+    let start, stop;
+    try {
+      start = parseDateTime(row.startValue);
+      stop = parseDateTime(row.stopValue);
+    } catch (error) {
+      throw new Error(`CSV row ${row.sourceRow}: ${error.message}`);
+    }
+    if (stop < start) throw new Error(`CSV row ${row.sourceRow}: stop time is before start time`);
+    const origin = locations[row.origin];
+    const destination = locations[row.destination];
+    const sourceDrivingHours = durationHours(row.drivingValue);
+    const sourceStopHours = durationHours(row.stopDurationValue);
+    const usesRoundedClockDurations = String(row.drivingValue).includes(":");
     return {
       id: index + 1,
-      device: row.Device,
+      device: row.device,
       date: dateKey(start),
       start: dateTimeLabel(start),
       stop: dateTimeLabel(stop),
       origin: origin.name,
       destination: destination.name,
-      originFull: row.Origin,
-      destinationFull: row.Destination,
+      originFull: row.origin,
+      destinationFull: row.destination,
       originLat: origin.lat,
       originLon: origin.lon,
       destLat: destination.lat,
       destLon: destination.lon,
-      distance: Number(row.Distance || 0),
-      drivingHours: hours(row["Driving Duration"]),
-      stopHours: hours(row["Stop Duration"]),
-      idlingHours: hours(row["Idling Duration"]),
-      maxSpeed: Number(row["Maximum Speed"] || 0),
-      zoneTypes: row["Stop Zone Types"] || "Unclassified",
-      nearZero: Number(row.Distance || 0) < 0.05
+      distance: Number(row.distanceValue || 0),
+      drivingHours: usesRoundedClockDurations ? (stop - start) / 3600000 : sourceDrivingHours,
+      stopHours: sourceStopHours,
+      idlingHours: durationHours(row.idlingValue),
+      maxSpeed: Number(row.maxSpeedValue || 0),
+      zoneTypes: row.zoneTypes || "Unclassified",
+      nearZero: Number(row.distanceValue || 0) < 0.05,
+      _startMs: start.getTime(),
+      _stopMs: stop.getTime(),
+      _sourceStopHours: sourceStopHours,
+      _usesRoundedClockDurations: usesRoundedClockDurations
     };
-  }).sort((a, b) => a.start.localeCompare(b.start));
+  }).sort((a, b) => a._startMs - b._startMs);
+  const nextStartByDevice = new Map();
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const row = rows[index];
+    const nextStart = nextStartByDevice.get(row.device);
+    const gapHours = nextStart === undefined ? NaN : (nextStart - row._stopMs) / 3600000;
+    const hasNextTrip = Number.isFinite(gapHours) && gapHours >= 0;
+    const fullStopHours = row._usesRoundedClockDurations && hasNextTrip ? gapHours : row._sourceStopHours;
+    const stopEndMs = hasNextTrip ? nextStart : row._stopMs + fullStopHours * 3600000;
+    row.isOvernightStop = dateKey(new Date(row._stopMs)) !== dateKey(new Date(stopEndMs));
+    row.fullStopHours = fullStopHours;
+    row.stopHours = row.isOvernightStop ? 0 : fullStopHours;
+    nextStartByDevice.set(row.device, row._startMs);
+  }
   const days = [...new Set(rows.map(row => row.date))].sort();
   const daily = days.map(date => {
     const dayRows = rows.filter(row => row.date === date);
@@ -885,6 +1004,7 @@ function buildDataset(csvText, sourceName) {
       drivingHours: dayRows.reduce((sum, row) => sum + row.drivingHours, 0),
       idlingHours: dayRows.reduce((sum, row) => sum + row.idlingHours, 0),
       stopHours: dayRows.reduce((sum, row) => sum + row.stopHours, 0),
+      overnightStops: dayRows.filter(row => row.isOvernightStop).length,
       maxSpeed: dayRows.reduce((max, row) => Math.max(max, row.maxSpeed), 0),
       nearZero: dayRows.filter(row => row.nearZero).length
     };
@@ -920,6 +1040,7 @@ function buildDataset(csvText, sourceName) {
       totalDrivingHours: totalDriving,
       totalIdlingHours: totalIdling,
       totalStopHours: rows.reduce((sum, row) => sum + row.stopHours, 0),
+      overnightStopCount: rows.filter(row => row.isOvernightStop).length,
       maxSpeed: rows.reduce((max, row) => Math.max(max, row.maxSpeed), 0),
       nearZeroCount: rows.filter(row => row.nearZero).length,
       idlingToDriving: totalDriving ? (totalIdling / totalDriving) * 100 : 0,
@@ -956,6 +1077,7 @@ function currentStats() {
     driving: rows.reduce((sum, row) => sum + row.drivingHours, 0),
     idling: rows.reduce((sum, row) => sum + row.idlingHours, 0),
     stop: rows.reduce((sum, row) => sum + row.stopHours, 0),
+    overnightStops: rows.filter(row => row.isOvernightStop).length,
     nearZero: rows.filter(row => row.nearZero).length,
     maxSpeed: rows.reduce((max, row) => Math.max(max, row.maxSpeed), 0)
   };
@@ -1121,7 +1243,8 @@ function renderDetail(stop = null) {
       <div class="detail-row"><span>Distance</span><strong>${fmt(stats.distance)} km</strong></div>
       <div class="detail-row"><span>Driving</span><strong>${fmt(stats.driving, 2)} hours</strong></div>
       <div class="detail-row"><span>Idling</span><strong>${fmt(stats.idling, 2)} hours</strong></div>
-      <div class="detail-row"><span>Stops</span><strong>${fmt(stats.stop, 2)} hours</strong></div>
+      <div class="detail-row"><span>Day stops</span><strong>${fmt(stats.stop, 2)} hours</strong></div>
+      <div class="detail-row"><span>Overnight gaps</span><strong>${stats.overnightStops} excluded</strong></div>
       <div class="detail-row"><span>Peak speed</span><strong>${fmtCompact(stats.maxSpeed)}</strong></div>`;
     return;
   }
@@ -1179,16 +1302,17 @@ function renderInsights() {
   const s = DATA.summary;
   byId("idleInsight").textContent = `${fmt(s.totalIdlingHours, 1)} idle hours were recorded, equal to about ${fmtCompact(s.idlingToDriving)}% of total driving time. Highest idle day: ${s.highestIdleDay?.label || "n/a"}.`;
   byId("zeroInsight").textContent = `${s.nearZeroCount} legs were under 0.05 km and are visually de-emphasized as likely parked/GPS-jitter records.`;
-  byId("confidenceInsight").textContent = `${s.confidenceCounts.precise || 0} locations decoded from Plus Codes; ${s.confidenceCounts.locality || 0} use named locality anchors and should be validated for operational routing.`;
+  byId("confidenceInsight").textContent = `${s.confidenceCounts.precise || 0} locations use CSV coordinates or Plus Codes; ${s.confidenceCounts.locality || 0} use named locality anchors and should be validated for operational routing.`;
 }
 function renderTable() {
   const rows = filteredRows();
-  byId("tableSubhead").textContent = `${rows.length} records shown from ${DATA.sourceName}`;
+  const overnightStops = rows.filter(row => row.isOvernightStop).length;
+  byId("tableSubhead").textContent = `${rows.length} records shown from ${DATA.sourceName}; ${overnightStops} overnight gaps excluded from stop hours`;
   byId("tripRows").innerHTML = rows.map(row => `
     <tr class="${row.nearZero ? "zero" : ""}">
       <td data-label="Start">${esc(row.start)}</td><td data-label="Origin">${esc(row.origin)}</td><td data-label="Destination">${esc(row.destination)}</td>
       <td class="num" data-label="Km">${fmt(row.distance, 2)}</td><td class="num" data-label="Drive h">${fmt(row.drivingHours, 2)}</td>
-      <td class="num" data-label="Idle h">${fmt(row.idlingHours, 2)}</td><td class="num" data-label="Stop h">${fmt(row.stopHours, 2)}</td>
+      <td class="num" data-label="Idle h">${fmt(row.idlingHours, 2)}</td><td class="num" data-label="Day stop h" title="${row.isOvernightStop ? "Overnight gap excluded" : ""}">${fmt(row.stopHours, 2)}</td>
       <td class="num" data-label="Max speed">${fmtCompact(row.maxSpeed)}</td><td data-label="Zones">${esc(row.zoneTypes)}</td>
     </tr>`).join("");
 }
